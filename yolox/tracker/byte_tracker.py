@@ -146,25 +146,31 @@ class STrack(BaseTrack):
 
 
 class BYTETracker(object):
-    def __init__(self, args, frame_rate=30):
-        self.tracked_stracks = []  # type: list[STrack]
-        self.lost_stracks = []  # type: list[STrack]
-        self.removed_stracks = []  # type: list[STrack]
+    def __init__(self, track_thresh=0.6, track_buffer=30, match_thresh=0.9,
+            mot20=False, frame_rate=30):
+        self.track_thresh = track_thresh
+        self.track_buffer = track_buffer
+        self.match_thresh = match_thresh
+        self.mot20 = mot20
+        self.frame_rate = frame_rate
 
         self.frame_id = 0
-        self.args = args
-        #self.det_thresh = args.track_thresh
-        self.det_thresh = args.track_thresh + 0.1
-        self.buffer_size = int(frame_rate / 30.0 * args.track_buffer)
+        # self.det_thresh = args.track_thresh
+        self.det_thresh = self.track_thresh + 0.1
+        self.buffer_size = int(frame_rate / 30.0 * self.track_buffer)
         self.max_time_lost = self.buffer_size
         self.kalman_filter = KalmanFilter()
 
+        self.tracked_stracks = list()
+        self.lost_stracks = list()
+        self.removed_stracks = list()
+
     def update(self, output_results, img_info, img_size, masks=None):
         self.frame_id += 1
-        activated_starcks = []
-        refind_stracks = []
-        lost_stracks = []
-        removed_stracks = []
+        activated_starcks = list()
+        refind_stracks = list()
+        lost_stracks = list()
+        removed_stracks = list()
 
         if output_results.shape[1] == 5:
             scores = output_results[:, 4]
@@ -182,9 +188,9 @@ class BYTETracker(object):
         else:
             assert len(scores) == len(masks)
 
-        remain_inds = scores > self.args.track_thresh
+        remain_inds = scores > self.track_thresh
         inds_low = scores > 0.1
-        inds_high = scores < self.args.track_thresh
+        inds_high = scores < self.track_thresh
 
         inds_second = np.logical_and(inds_low, inds_high)
         dets_second = bboxes[inds_second]
@@ -199,11 +205,11 @@ class BYTETracker(object):
             detections = [STrack(STrack.tlbr_to_tlwh(tlbr), s, mask=mask) for
                           (tlbr, s, mask) in zip(dets, scores_keep, masks_keep)]
         else:
-            detections = []
+            detections = list()
 
         ''' Add newly detected tracklets to tracked_stracks'''
-        unconfirmed = []
-        tracked_stracks = []  # type: list[STrack]
+        unconfirmed = list()
+        tracked_stracks = list()  # type: list[STrack]
         for track in self.tracked_stracks:
             if not track.is_activated:
                 unconfirmed.append(track)
@@ -215,9 +221,9 @@ class BYTETracker(object):
         # Predict the current location with KF
         STrack.multi_predict(strack_pool)
         dists = matching.iou_distance(strack_pool, detections)
-        if not self.args.mot20:
+        if not self.mot20:
             dists = matching.fuse_score(dists, detections)
-        matches, u_track, u_detection = matching.linear_assignment(dists, thresh=self.args.match_thresh)
+        matches, u_track, u_detection = matching.linear_assignment(dists, thresh=self.match_thresh)
 
         for itracked, idet in matches:
             track = strack_pool[itracked]
@@ -236,7 +242,7 @@ class BYTETracker(object):
             detections_second = [STrack(STrack.tlbr_to_tlwh(tlbr), s, mask=mask) for
                           (tlbr, s, mask) in zip(dets_second, scores_second, masks_second)]
         else:
-            detections_second = []
+            detections_second = list()
         r_tracked_stracks = [strack_pool[i] for i in u_track if strack_pool[i].state == TrackState.Tracked]
         dists = matching.iou_distance(r_tracked_stracks, detections_second)
         matches, u_track, u_detection_second = matching.linear_assignment(dists, thresh=0.5)
@@ -259,7 +265,7 @@ class BYTETracker(object):
         '''Deal with unconfirmed tracks, usually tracks with only one beginning frame'''
         detections = [detections[i] for i in u_detection]
         dists = matching.iou_distance(unconfirmed, detections)
-        if not self.args.mot20:
+        if not self.mot20:
             dists = matching.fuse_score(dists, detections)
         matches, u_unconfirmed, u_detection = matching.linear_assignment(dists, thresh=0.7)
         for itracked, idet in matches:
@@ -277,6 +283,7 @@ class BYTETracker(object):
                 continue
             track.activate(self.kalman_filter, self.frame_id)
             activated_starcks.append(track)
+
         """ Step 5: Update state"""
         for track in self.lost_stracks:
             if self.frame_id - track.end_frame > self.max_time_lost:
@@ -300,8 +307,8 @@ class BYTETracker(object):
 
 
 def joint_stracks(tlista, tlistb):
-    exists = {}
-    res = []
+    exists = dict()
+    res = list()
     for t in tlista:
         exists[t.track_id] = 1
         res.append(t)
@@ -314,7 +321,7 @@ def joint_stracks(tlista, tlistb):
 
 
 def sub_stracks(tlista, tlistb):
-    stracks = {}
+    stracks = dict()
     for t in tlista:
         stracks[t.track_id] = t
     for t in tlistb:
