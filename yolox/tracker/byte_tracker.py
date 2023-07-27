@@ -184,7 +184,7 @@ class BYTETracker(object):
         bboxes /= scale
 
         if masks is None:
-            masks = [None] * len(scores)
+            masks = np.array([None] * len(scores))
         else:
             assert len(scores) == len(masks)
 
